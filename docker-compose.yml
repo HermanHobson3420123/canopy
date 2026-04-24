@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  # Main canopy node service
+  canopy:
+    build:
+      context: .
+      dockerfile: .docker/Dockerfile
+    container_name: canopy-node
+    restart: unless-stopped
+    ports:
+      - "${P2P_PORT:-9000}:9000"       # P2P networking port
+      - "${RPC_PORT:-50151}:50151"     # RPC API port
+      - "${ADMIN_PORT:-50152}:50152"   # Admin API port
+    volumes:
+      - canopy-data:/root/.canopy
+    environment:
+      - CANOPY_ENV=${CANOPY_ENV:-mainnet}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    networks:
+      - canopy-net
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:50151/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # Optimized production build
+  canopy-optimized:
+    build:
+      context: .
+      dockerfile: .docker/Dockerfile.optimized
+    container_name: canopy-node-optimized
+    restart: unless-stopped
+    profiles:
+      - production
+    ports:
+      - "${P2P_PORT:-9000}:9000"
+      - "${RPC_PORT:-50151}:50151"
+      - "${ADMIN_PORT:-50152}:50152"
+    volumes:
+      - canopy-data:/root/.canopy
+    environment:
+      - CANOPY_ENV=${CANOPY_ENV:-mainnet}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    networks:
+      - canopy-net
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:50151/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # Auto-update sidecar (Go implementation)
+  auto-updater:
+    build:
+      context: .
+      dockerfile: .docker/auto-update/Dockerfile.go
+    container_name: canopy-auto-updater
+    restart: unless-stopped
+    profiles:
+      - auto-update
+    depends_on:
+      canopy:
+        condition: service_healthy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - canopy-data:/root/.canopy
+    environment:
+      - TARGET_CONTAINER=canopy-node
+      - CHECK_INTERVAL=${UPDATE_CHECK_INTERVAL:-3600}
+      - CANOPY_RPC_URL=http://canopy:50151
+    networks:
+      - canopy-net
+
+volumes:
+  canopy-data:
+    driver: local
+    name: canopy-data
+
+networks:
+  canopy-net:
+    driver: bridge
+    name: canopy-net
